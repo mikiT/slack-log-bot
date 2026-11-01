@@ -360,7 +360,8 @@ GitHub Pages を使う場合の入力例:
 
 GitHub Pages はリポジトリの **Settings → Pages** で Source を **GitHub Actions** に設定してください。
 `.github/workflows/pages.yml` が `privacy-policy/` ディレクトリだけを Pages として公開します。
-`main` ブランチへ push すると自動でデプロイされます。
+現在の `feat/private-channel-drive-layout` ブランチでも確認でき、`main` ブランチへ移行した後も
+自動デプロイされます。
 
 > [!IMPORTANT]
 > **手順4（本番環境への切り替え）を飛ばさないでください。**

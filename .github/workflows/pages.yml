@@ -2,7 +2,9 @@ name: Deploy privacy policy site
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - feat/private-channel-drive-layout
     paths:
       - "privacy-policy/**"
       - ".github/workflows/pages.yml"
