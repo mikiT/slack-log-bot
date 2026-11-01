@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>プライバシーポリシー | Slack Log Bot</title>
+</head>
+<body>
+  <main>
+    <h1>プライバシーポリシー</h1>
+    <p>最終更新日: 2026年11月1日</p>
+
+    <h2>1. 概要</h2>
+    <p>Slack Log Bot（以下「本 bot」）は、Slack のメッセージと添付ファイルを Google Sheets および Google Drive に保存します。本 bot は個人利用または限定利用のツールであり、情報を販売しません。</p>
+
+    <h2>2. 取得する情報</h2>
+    <ul>
+      <li>bot が参加している channel のメッセージとスレッド返信</li>
+      <li>投稿者 ID、表示名、ユーザー名</li>
+      <li>private channel のアクセス制御に必要な Slack ユーザーのメールアドレス</li>
+      <li>メッセージに含まれる添付ファイル</li>
+      <li>channel の ID、名前、公開・非公開の状態、メンバー情報</li>
+    </ul>
+
+    <h2>3. 利用目的</h2>
+    <ul>
+      <li>Slack のログを Google Sheets に保存する</li>
+      <li>Slack の添付ファイルを Google Drive に保存する</li>
+      <li>private channel ごとの閲覧権限を Google Drive と Google Sheets に反映する</li>
+      <li>メッセージや channel の変更を保存先へ反映する</li>
+    </ul>
+
+    <h2>4. 保存先とアクセス制御</h2>
+    <p>データは bot の管理者が指定した Google アカウントまたは共有ドライブに保存されます。public channel のログは public 用スプレッドシートに保存され、private channel のログは channel ごとの専用フォルダとスプレッドシートに保存されます。</p>
+    <p>private channel のフォルダ、スプレッドシート、添付ファイルは、その channel のメンバーだけに共有されます。共有ドライブでは Google Drive の限定アクセス設定を使用します。</p>
+
+    <h2>5. 第三者提供</h2>
+    <p>取得した情報を広告目的で利用したり、第三者へ販売したりしません。ログ保存のために Slack API、Google Sheets API、Google Drive API を使用します。各サービスの利用規約とプライバシーポリシーも適用されます。</p>
+
+    <h2>6. 保存期間と削除</h2>
+    <p>データはログ保存に必要な期間保存されます。削除を希望する場合は bot の運用者へ連絡してください。Slack でメッセージが削除された場合、対応する行を削除し、関連する添付ファイルを Google Drive のゴミ箱へ移動します。</p>
+
+    <h2>7. OAuth 権限の取り消し</h2>
+    <p><a href="https://myaccount.google.com/permissions">Google アカウントの第三者アクセス管理</a>から、いつでもアクセスを取り消せます。</p>
+
+    <h2>8. 連絡先</h2>
+    <p><a href="https://github.com/mikiT/slack-log-bot/issues">GitHub Issue</a> から連絡してください。</p>
+  </main>
+</body>
+</html>
