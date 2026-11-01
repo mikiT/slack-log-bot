@@ -352,16 +352,8 @@ App-Level Token だけはマニフェストで作れないため、手動で生�
 > 禁止している可能性があります。その場合は管理者に外部アプリの許可を依頼するか、個人利用できる
 > Google Cloud プロジェクトを選択してください。
 
-GitHub Pages を使う場合の入力例:
-
-- 承認済みドメイン: `mikiT.github.io`
-- アプリケーションのホームページ: `https://mikiT.github.io/slack-log-bot/`
-- プライバシーポリシー: `https://mikiT.github.io/slack-log-bot/privacy-policy.html`
-
-GitHub Pages はリポジトリの **Settings → Pages** で Source を **GitHub Actions** に設定してください。
-`.github/workflows/pages.yml` が `privacy-policy/` ディレクトリだけを Pages として公開します。
-現在の `feat/private-channel-drive-layout` ブランチでも確認でき、`main` ブランチへ移行した後も
-自動デプロイされます。
+GitHub Pages の設定、公開 URL、Google OAuth への入力値は
+[`docs/github-pages.md`](docs/github-pages.md) を参照してください。
 
 > [!IMPORTANT]
 > **手順4（本番環境への切り替え）を飛ばさないでください。**
