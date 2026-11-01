@@ -57,8 +57,10 @@ SLACK_BOT_TOKEN = _required("SLACK_BOT_TOKEN")
 # APP_TOKEN is only required for Socket Mode (main.py), not for weekly collection
 SLACK_APP_TOKEN = os.environ.get("SLACK_APP_TOKEN", "")
 
-# Sheets and Drive share one OAuth2 user credential; see google_auth.py
-GOOGLE_SPREADSHEET_ID = _required("GOOGLE_SPREADSHEET_ID")
+# Sheets and Drive share one OAuth2 user credential; see google_auth.py.
+# The public spreadsheet is discovered under the public Drive folder. The
+# variable remains an optional compatibility override for older installations.
+GOOGLE_SPREADSHEET_ID = os.environ.get("GOOGLE_SPREADSHEET_ID", "").strip()
 GOOGLE_DRIVE_FOLDER_ID = _required("GOOGLE_DRIVE_FOLDER_ID")
 def _client_file() -> str:
     """The OAuth client for this profile, falling back to the shared one.

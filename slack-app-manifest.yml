@@ -23,7 +23,7 @@ _metadata:
   minor_version: 1
 
 display_information:
-  name: Slackログ保存bot
+  name: Slackログ保存bot_privch対応版
   description: Slack の投稿・スレッド・添付ファイルを Google スプレッドシート/Drive に保存します
   background_color: "#1e8e3e"
   long_description: |-
@@ -39,53 +39,53 @@ display_information:
     - 見やすさ: 発言者ごとの色分け、スレッドの折りたたみ、返信数の表示
 
     チャンネル内で bot にメンションすると、スプレッドシート URL の表示や
-    過去ログの取り込みができます（`@Slackログ保存bot help`）。
+    過去ログの取り込みができます（`@slack-log-bot-private help`）。
 
 features:
   bot_user:
-    display_name: slack-log-bot
+    display_name: slack-log-bot-private
     always_online: true
 
 oauth_config:
   scopes:
     bot:
-      # bot へのメンションイベント受信（app_mention イベントに必須）
-      - app_mentions:read
-      # パブリックチャンネルのメッセージ履歴読み取り
-      - channels:history
-      # チャンネル情報（名前等）の取得
-      - channels:read
-      # プライベートチャンネルのメッセージ履歴読み取り
-      - groups:history
-      # プライベートチャンネル情報・メンバー一覧の取得
-      - groups:read
-      # ユーザー名・表示名の取得
-      - users:read
-      # ユーザーのメールアドレス取得（プライベートチャンネルの共有制御に必要）
-      - users:read.email
-      # 添付ファイルのダウンロード
-      - files:read
-      # bot のメッセージ送信（コマンド応答に必要）
-      - chat:write
+    # bot へのメンションイベント受信（app_mention イベントに必須）
+    - app_mentions:read
+    # パブリックチャンネルのメッセージ履歴読み取り
+    - channels:history
+    # チャンネル情報（名前等）の取得
+    - channels:read
+    # プライベートチャンネルのメッセージ履歴読み取り
+    - groups:history
+    # プライベートチャンネル情報・メンバー一覧の取得
+    - groups:read
+    # ユーザー名・表示名の取得
+    - users:read
+    # ユーザーのメールアドレス取得（プライベートチャンネルの共有制御に必要）
+    - users:read.email
+    # 添付ファイルのダウンロード
+    - files:read
+    # bot のメッセージ送信（コマンド応答に必要）
+    - chat:write
 
 settings:
   event_subscriptions:
     bot_events:
-      # bot へのメンション（コマンド応答に必要）
-      - app_mention
-      # パブリックチャンネルのメッセージ
-      - message.channels
-      # プライベートチャンネルのメッセージ
-      - message.groups
-      # メンバー参加 → そのチャンネルのログを自動で共有
-      - member_joined_channel
-      # メンバー退出 → 共有を自動で解除
-      - member_left_channel
-      # チャンネル名変更 → スプレッドシート/フォルダ名を追従
-      - channel_rename
-      - group_rename
-      # 表示名の変更 → 記録済みの行にも反映
-      - user_change
+    # bot へのメンション（コマンド応答に必要）
+    - app_mention
+    # パブリックチャンネルのメッセージ
+    - message.channels
+    # プライベートチャンネルのメッセージ
+    - message.groups
+    # メンバー参加 → そのチャンネルのログを自動で共有
+    - member_joined_channel
+    # メンバー退出 → 共有を自動で解除
+    - member_left_channel
+    # チャンネル名変更 → スプレッドシート/フォルダ名を追従
+    - channel_rename
+    - group_rename
+    # 表示名の変更 → 記録済みの行にも反映
+    - user_change
   interactivity:
     is_enabled: false
   org_deploy_enabled: false

@@ -22,12 +22,13 @@ PAGE_SIZE = 200
 
 
 def _collect_attachments(
-    drive, files, channel_name, member_emails, channel_id
+    drive, files, channel_name, member_emails, channel_id, is_private
 ) -> list[tuple[str, str]]:
     attachments = []
     for file_info in files:
         stored = drive.download_from_slack_and_upload(
             file_info, config.SLACK_BOT_TOKEN, channel_name, member_emails, channel_id,
+            is_private,
         )
         if stored:
             attachments.append(stored)
@@ -36,7 +37,7 @@ def _collect_attachments(
 
 def _build_entry(
     client, drive, message, channel_name, member_emails, known_ts, thread_ts,
-    channel_id,
+    channel_id, is_private=False,
 ) -> dict | None:
     user_id = message.get("user", "")
     if not user_id:
@@ -51,8 +52,9 @@ def _build_entry(
     # again: the row is deduped at write time, the file is not.
     attachments = []
     if ts not in known_ts:
-        attachments = _collect_attachments(
-            drive, message.get("files", []), channel_name, member_emails, channel_id
+            attachments = _collect_attachments(
+            drive, message.get("files", []), channel_name, member_emails, channel_id,
+            is_private
         )
 
     return {
@@ -73,6 +75,7 @@ def fetch_channel_messages(
     known_ts: set[str],
     member_emails: list[str] | None = None,
     skip_user_ids: tuple[str, ...] = (),
+    is_private: bool = False,
 ) -> list[dict]:
     """Every message and thread reply in the channel since oldest_ts.
 
@@ -105,7 +108,7 @@ def fetch_channel_messages(
             # kept.
             entry = _build_entry(
                 client, drive, message, channel_name, member_emails, known_ts,
-                message.get("thread_ts"), channel_id,
+                message.get("thread_ts"), channel_id, is_private,
             )
             if entry is None:
                 continue
@@ -114,7 +117,7 @@ def fetch_channel_messages(
             if message.get("reply_count", 0) > 0:
                 collected.extend(_fetch_replies(
                     client, drive, channel_id, channel_name, entry["ts"],
-                    member_emails, known_ts, skip_user_ids,
+                    member_emails, known_ts, skip_user_ids, is_private,
                 ))
 
         cursor = resp.get("response_metadata", {}).get("next_cursor")
@@ -126,7 +129,7 @@ def fetch_channel_messages(
 
 def _fetch_replies(
     client, drive, channel_id, channel_name, parent_ts,
-    member_emails, known_ts, skip_user_ids,
+    member_emails, known_ts, skip_user_ids, is_private,
 ) -> list[dict]:
     try:
         resp = client.conversations_replies(
@@ -145,7 +148,7 @@ def _fetch_replies(
             continue
         entry = _build_entry(
             client, drive, reply, channel_name, member_emails, known_ts,
-            parent_ts, channel_id,
+            parent_ts, channel_id, is_private,
         )
         if entry is not None:
             replies.append(entry)

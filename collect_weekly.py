@@ -82,6 +82,7 @@ def collect(channel_filter: str | None = None, days: int = 8):
         ch_name = ch["name"]
         ch_id = ch["id"]
         is_private = ch.get("is_private", False) or ch.get("is_group", False)
+        sheets.register_channel(ch_id, is_private)
 
         label = "private" if is_private else "public"
         logger.info(f"Collecting #{ch_name} [{label}] (past {days} days)...")
@@ -93,7 +94,9 @@ def collect(channel_filter: str | None = None, days: int = 8):
         member_emails = get_member_emails(client, ch_id)
         try:
             granted, _ = sheets.sync_channel_access(ch_name, member_emails, channel_id=ch_id)
-            granted += drive.sync_channel_access(ch_name, member_emails, channel_id=ch_id)[0]
+            granted += drive.sync_channel_access(
+                ch_name, member_emails, channel_id=ch_id, is_private=is_private
+            )[0]
             if granted:
                 logger.info(f"  #{ch_name}: shared with {granted} new member(s)")
         except Exception as e:
@@ -106,7 +109,7 @@ def collect(channel_filter: str | None = None, days: int = 8):
 
         collected = fetch_channel_messages(
             client, drive, ch_id, ch_name, oldest_ts, known_ts, member_emails,
-            skip_user_ids=bot_user_ids,
+            skip_user_ids=bot_user_ids, is_private=is_private,
         )
 
         # Phase 2: Write grouped by thread

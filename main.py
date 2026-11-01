@@ -85,13 +85,13 @@ def bot_user_ids(client) -> tuple[str, ...]:
 
 def process_files(
     files: list[dict], channel_name: str, member_emails: list[str] | None,
-    channel_id: str,
+    channel_id: str, is_private: bool = False,
 ) -> list[str]:
     links = []
     for file_info in files:
         link = drive.download_from_slack_and_upload(
             file_info, config.SLACK_BOT_TOKEN, channel_name,
-            member_emails, channel_id,
+            member_emails, channel_id, is_private,
         )
         if link:
             links.append(link)
@@ -120,7 +120,10 @@ def handle_message(event, client, logger):
     if not user_id or user_id in bot_user_ids(client):
         return
 
-    channel_name = get_channel_info(client, channel_id)["name"]
+    channel_info = get_channel_info(client, channel_id)
+    channel_name = channel_info["name"]
+    is_private = channel_info.get("is_private", False)
+    sheets.register_channel(channel_id, is_private)
     # The channel's sheet is shared with exactly this channel's members.
     member_emails = get_member_emails(client, channel_id)
 
@@ -145,7 +148,9 @@ def handle_message(event, client, logger):
     # Upload files in background and update attachment column
     if files:
         def upload_files():
-            links = process_files(files, channel_name, member_emails, channel_id)
+            links = process_files(
+                files, channel_name, member_emails, channel_id, is_private
+            )
             if links:
                 sheets.update_attachment_links(
                     channel_name, ts, links, member_emails, channel_id,
@@ -163,7 +168,9 @@ def handle_message_edited(event, client, logger):
         return
 
     channel_id = event.get("channel", "")
-    channel_name = get_channel_info(client, channel_id)["name"]
+    channel_info = get_channel_info(client, channel_id)
+    channel_name = channel_info["name"]
+    sheets.register_channel(channel_id, channel_info.get("is_private", False))
     try:
         sheets.update_message(
             channel_name,
@@ -188,7 +195,9 @@ def handle_message_deleted(event, client, logger):
         return
 
     channel_id = event.get("channel", "")
-    channel_name = get_channel_info(client, channel_id)["name"]
+    channel_info = get_channel_info(client, channel_id)
+    channel_name = channel_info["name"]
+    sheets.register_channel(channel_id, channel_info.get("is_private", False))
     try:
         sheets.delete_message(
             channel_name, ts, get_member_emails(client, channel_id), channel_id,
@@ -238,17 +247,28 @@ def handle_file_shared(event, client, logger):
 def _sync_access(client, channel_id: str, channel_name: str, revoke: list[str] | None = None):
     """Bring the channel's spreadsheet and folder in line with its membership."""
     invalidate_members(channel_id)
+    sheets.register_channel(
+        channel_id, get_channel_info(client, channel_id).get("is_private", False)
+    )
     member_emails = get_member_emails(client, channel_id)
+    is_private = get_channel_info(client, channel_id).get("is_private", False)
     granted = revoked = 0
-    for handler in (sheets, drive):
-        try:
-            g, r = handler.sync_channel_access(
-                channel_name, member_emails, revoke, channel_id
-            )
-            granted += g
-            revoked += r
-        except Exception as e:
-            logger.error(f"Failed to sync access for #{channel_name}: {e}")
+    try:
+        g, r = sheets.sync_channel_access(
+            channel_name, member_emails, revoke, channel_id
+        )
+        granted += g
+        revoked += r
+    except Exception as e:
+        logger.error(f"Failed to sync sheet access for #{channel_name}: {e}")
+    try:
+        g, r = drive.sync_channel_access(
+            channel_name, member_emails, revoke, channel_id, is_private
+        )
+        granted += g
+        revoked += r
+    except Exception as e:
+        logger.error(f"Failed to sync Drive access for #{channel_name}: {e}")
     return granted, revoked
 
 
@@ -296,16 +316,20 @@ def handle_channel_rename(event, client, logger):
     """Keep the channel's spreadsheet and folder with it when it is renamed."""
     channel = event.get("channel") or {}
     channel_id, new_name = channel.get("id", ""), channel.get("name", "")
+    previous_name = event.get("previous_name", "")
     if not channel_id or not new_name:
         return
 
     invalidate_channel(channel_id)
     moved = False
-    for handler in (sheets, drive):
-        try:
-            moved |= handler.rename_channel(channel_id, new_name)
-        except Exception as e:
-            logger.error(f"Failed to follow the rename of {channel_id}: {e}")
+    try:
+        moved |= sheets.rename_channel(channel_id, new_name, previous_name)
+    except Exception as e:
+        logger.error(f"Failed to follow spreadsheet rename for {channel_id}: {e}")
+    try:
+        moved |= drive.rename_channel(channel_id, new_name)
+    except Exception as e:
+        logger.error(f"Failed to follow Drive rename for {channel_id}: {e}")
     if moved:
         logger.info(f"Followed channel rename to #{new_name}")
 
@@ -382,6 +406,9 @@ def handle_mention(event, client, say, logger):
 
 def _backfill_channel(client, channel_id: str, channel_name: str, days: int):
     """Collect past messages for a single channel."""
+    sheets.register_channel(
+        channel_id, get_channel_info(client, channel_id).get("is_private", False)
+    )
     member_emails = get_member_emails(client, channel_id)
 
     # Attachments of messages already recorded would be downloaded and
@@ -394,7 +421,7 @@ def _backfill_channel(client, channel_id: str, channel_name: str, days: int):
 
     collected = fetch_channel_messages(
         client, drive, channel_id, channel_name, oldest_ts, known_ts,
-        member_emails, skip_user_ids=bot_user_ids(client),
+        member_emails, skip_user_ids=bot_user_ids(client), is_private=is_private,
     )
 
     new_count, skip_count = sheets.write_messages_grouped(

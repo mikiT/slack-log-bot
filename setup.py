@@ -616,6 +616,17 @@ def check_drive(target: str) -> bool:
             )
 
         if folder:
+            if drive_id:
+                attempt(
+                    "privateフォルダの限定アクセス設定",
+                    lambda: drive.files().update(
+                        fileId=folder["id"],
+                        body={"inheritedPermissionsDisabled": True},
+                        fields="id",
+                    ).execute(),
+                    "限定アクセスを設定できません。共有ドライブの設定と bot の権限を確認してください。",
+                )
+
             found = attempt(
                 "作ったものを検索で見つけられるか",
                 lambda: drive.files().list(
@@ -662,7 +673,10 @@ def provision_google_resources(
 ) -> dict[str, str]:
     import gspread
 
-    from google_drive import drive_service, shared_drive_id
+    from google_drive import (
+        PUBLIC_FOLDER_NAME, PRIVATE_FOLDER_NAME, drive_service, ensure_folder,
+        find_file, move_into_folder, shared_drive_id,
+    )
     from sheet_guide import ensure_guide_sheet
 
     step(3, "スプレッドシートと Drive フォルダの準備")
@@ -698,35 +712,38 @@ def provision_google_resources(
     drive_id = shared_drive_id(drive, folder_id)
     drive.bind_drive(drive_id)
     in_shared_drive = bool(drive_id)
+    public_folder_id = ensure_folder(drive, PUBLIC_FOLDER_NAME, folder_id)
+    ensure_folder(drive, PRIVATE_FOLDER_NAME, folder_id)
+    ok("public / private フォルダを準備")
     if in_shared_drive:
         ok("保存先は共有ドライブです")
         print("      ファイルの所有者は共有ドライブ（組織）になります。")
-        print("      閲覧できる範囲は共有ドライブのメンバーで決まり、")
-        print("      チャンネルごとの個別共有は行いません。")
+        print("      private channel は限定アクセスフォルダで個別共有します。")
 
-    if env.get("GOOGLE_SPREADSHEET_ID"):
-        ok(f"既存のスプレッドシートを使用: {env['GOOGLE_SPREADSHEET_ID']}")
+    spreadsheet_id = env.get("GOOGLE_SPREADSHEET_ID") or find_file(
+        drive, public_folder_id, "application/vnd.google-apps.spreadsheet"
+    )
+    if spreadsheet_id:
+        ok(f"既存のpublicスプレッドシートを使用: {spreadsheet_id}")
     else:
         ss_name = SPREADSHEET_NAME.format(workspace=workspace)
-        ss_id, created = find_or_create(
+        spreadsheet_id, created = find_or_create(
             drive, ss_name, "application/vnd.google-apps.spreadsheet",
-            parent=folder_id,
+            parent=public_folder_id,
         )
-        env["GOOGLE_SPREADSHEET_ID"] = ss_id
-        write_env(env)
         ok(f"スプレッドシートを{'作成' if created else '検出'}: {ss_name}")
-        print(f"      https://docs.google.com/spreadsheets/d/{ss_id}/edit")
+        print(f"      https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit")
 
     # Spreadsheets made before this was folded in sit at My Drive root.
     try:
-        if move_into_folder(drive, env["GOOGLE_SPREADSHEET_ID"], folder_id):
-            ok("スプレッドシートを Drive フォルダに移動")
+        if move_into_folder(drive, spreadsheet_id, public_folder_id):
+            ok("スプレッドシートを public フォルダに移動")
     except Exception as e:
         warn(f"スプレッドシートをフォルダに移動できませんでした: {e}")
 
     # Google leaves an empty default sheet behind; make it the guide.
     try:
-        spreadsheet = gspread.authorize(creds).open_by_key(env["GOOGLE_SPREADSHEET_ID"])
+        spreadsheet = gspread.authorize(creds).open_by_key(spreadsheet_id)
         if ensure_guide_sheet(spreadsheet, in_shared_drive):
             ok("説明タブ「📖 このシートについて」を作成")
         else:
@@ -740,13 +757,6 @@ def provision_google_resources(
             ok(f"{stamped} 件にチャンネルIDを付与（リネーム追従のため）")
     except Exception as e:
         warn(f"チャンネルIDを付与できませんでした: {e}")
-
-    try:
-        moved = organise_attachment_folders(drive, folder_id)
-        if moved:
-            ok(f"添付フォルダ {moved} 件を「{ATTACHMENTS_FOLDER_NAME}」にまとめました")
-    except Exception as e:
-        warn(f"添付フォルダを整理できませんでした: {e}")
 
     return env
 
@@ -764,13 +774,28 @@ def verify(env: dict[str, str]):
         import config
         import gspread
 
-        from google_drive import drive_service
+        from google_drive import drive_service, shared_drive_id
 
         creds = google_auth.load_credentials()
         gc = gspread.authorize(creds)
-        ss = gc.open_by_key(config.GOOGLE_SPREADSHEET_ID)
-        ok(f"スプレッドシートを開けました: {ss.title}")
+        from google_drive import find_file
+
         drive = drive_service(creds)
+        drive.bind_drive(shared_drive_id(drive, config.GOOGLE_DRIVE_FOLDER_ID))
+        public_folder = find_file(
+            drive, config.GOOGLE_DRIVE_FOLDER_ID,
+            "application/vnd.google-apps.folder", "public",
+        )
+        if not public_folder:
+            raise RuntimeError("public フォルダが見つかりません")
+        spreadsheet_id = config.GOOGLE_SPREADSHEET_ID or find_file(
+            drive, public_folder,
+            "application/vnd.google-apps.spreadsheet",
+        )
+        if not spreadsheet_id:
+            raise RuntimeError("public スプレッドシートが見つかりません")
+        ss = gc.open_by_key(spreadsheet_id)
+        ok(f"スプレッドシートを開けました: {ss.title}")
         folder = drive.files().get(
             fileId=config.GOOGLE_DRIVE_FOLDER_ID, fields="name"
         ).execute()
@@ -822,7 +847,10 @@ def main():
 
     run_google_auth(reauth=args.reauth, port=args.auth_port)
 
-    env = provision_google_resources(env, workspace, channels, args.parent)
+    try:
+        env = provision_google_resources(env, workspace, channels, args.parent)
+    except RuntimeError as e:
+        fail(f"保存先の準備に失敗しました: {e}")
     write_env(env)
 
     verify(env)

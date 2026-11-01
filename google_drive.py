@@ -13,6 +13,9 @@ from google_auth import load_credentials
 logger = logging.getLogger(__name__)
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
+PUBLIC_FOLDER_NAME = "public"
+PRIVATE_FOLDER_NAME = "private"
+ATTACHMENTS_FOLDER_NAME = "添付ファイル"
 
 # Requests that need telling a shared drive exists. A files() or permissions()
 # call without supportsAllDrives fails as a 404 on a file that plainly exists,
@@ -106,9 +109,78 @@ def shared_drive_id(service, file_id: str) -> str | None:
         logger.warning(f"Could not tell whether {file_id} is in a shared drive: {e}")
         return None
 
-# Channel folders live under this, so the root folder shows the spreadsheets
-# rather than one folder per channel mixed in among them.
-ATTACHMENTS_FOLDER_NAME = "添付ファイル"
+
+def restrict_folder_access(service, folder_id: str) -> bool:
+    """Stop a shared-drive folder inheriting the parent's access.
+
+    This is the Drive API equivalent of a folder's "limited access" setting.
+    It is harmless for My Drive folders and lets private channel folders be
+    shared independently inside a shared drive.
+    """
+    try:
+        service.files().update(
+            fileId=folder_id,
+            body={"inheritedPermissionsDisabled": True},
+            fields="id",
+        ).execute()
+        return True
+    except Exception as e:
+        logger.warning(f"Could not restrict access to folder {folder_id}: {e}")
+        return False
+
+
+def ensure_folder(service, name: str, parent_id: str) -> str:
+    """Return a named child folder, creating it when necessary."""
+    try:
+        query = (
+            f"name = '{name}' and '{parent_id}' in parents and "
+            f"mimeType = '{FOLDER_MIME}' and trashed = false"
+        )
+        found = service.files().list(
+            q=query, fields="files(id)", pageSize=1
+        ).execute().get("files", [])
+        if found:
+            return found[0]["id"]
+        created = service.files().create(
+            body={"name": name, "mimeType": FOLDER_MIME, "parents": [parent_id]},
+            fields="id",
+        ).execute()
+        logger.info(f"Created Drive folder: {name}")
+        return created["id"]
+    except Exception as e:
+        raise RuntimeError(f"Driveフォルダ '{name}' を準備できません: {e}") from e
+
+
+def find_file(service, parent_id: str, mime_type: str, name: str = "") -> str | None:
+    """Find one direct child file, optionally by name."""
+    query = f"'{parent_id}' in parents and mimeType = '{mime_type}' and trashed = false"
+    if name:
+        query += f" and name = '{name}'"
+    try:
+        files = service.files().list(
+            q=query, fields="files(id)", pageSize=1
+        ).execute().get("files", [])
+        return files[0]["id"] if files else None
+    except Exception as e:
+        raise RuntimeError(f"Driveファイルを検索できません: {e}") from e
+
+
+def move_into_folder(service, file_id: str, folder_id: str) -> bool:
+    """Move a file into folder_id without changing its id."""
+    try:
+        meta = service.files().get(fileId=file_id, fields="parents").execute()
+        parents = meta.get("parents", [])
+        if folder_id in parents:
+            return False
+        service.files().update(
+            fileId=file_id,
+            addParents=folder_id,
+            removeParents=",".join(parents),
+            fields="id",
+        ).execute()
+        return True
+    except Exception as e:
+        raise RuntimeError(f"Driveファイル {file_id} を保存先へ移動できません: {e}") from e
 
 # Drive appProperty tying a channel folder to its Slack channel, so a rename
 # does not strand the files under the old name.
@@ -195,17 +267,17 @@ class DriveHandler:
         self.service.bind_drive(self.shared_drive_id)
         if self.shared_drive_id:
             logger.info(
-                "Attachments live in a shared drive; who can read them is the "
-                "drive's membership, not something the bot sets per channel."
+                "Attachments live in a shared drive; private channel folders use "
+                "Drive limited access and are shared per channel."
             )
         # Cache: channel_name -> folder_id
         self._channel_folders: dict[str, str] = {}
         self._attachments_root: str | None = None
+        self._public_root: str | None = None
+        self._private_root: str | None = None
 
     def _share_with_emails(self, file_id: str, emails: list[str]) -> int:
         """Share a file/folder with specific email addresses. Returns the count."""
-        if self.shared_drive_id:
-            return 0
         shared = 0
         for email in emails:
             try:
@@ -231,25 +303,28 @@ class DriveHandler:
         return files[0]["id"] if files else None
 
     def _get_attachments_root(self) -> str:
-        """The folder that holds the per-channel folders."""
+        """The public folder that holds public channel attachments."""
         if self._attachments_root:
             return self._attachments_root
 
-        folder_id = self._find_folder(ATTACHMENTS_FOLDER_NAME, self.root_folder_id)
-        if not folder_id:
-            created = self.service.files().create(
-                body={
-                    "name": ATTACHMENTS_FOLDER_NAME,
-                    "mimeType": FOLDER_MIME,
-                    "parents": [self.root_folder_id],
-                },
-                fields="id",
-            ).execute()
-            folder_id = created["id"]
-            logger.info(f"Created attachments folder: {ATTACHMENTS_FOLDER_NAME}")
+        self._attachments_root = ensure_folder(
+            self.service, ATTACHMENTS_FOLDER_NAME, self._get_public_root()
+        )
+        return self._attachments_root
 
-        self._attachments_root = folder_id
-        return folder_id
+    def _get_public_root(self) -> str:
+        if not self._public_root:
+            self._public_root = ensure_folder(
+                self.service, PUBLIC_FOLDER_NAME, self.root_folder_id
+            )
+        return self._public_root
+
+    def _get_private_root(self) -> str:
+        if not self._private_root:
+            self._private_root = ensure_folder(
+                self.service, PRIVATE_FOLDER_NAME, self.root_folder_id
+            )
+        return self._private_root
 
     def _find_by_channel_id(self, channel_id: str, parent: str) -> dict | None:
         if not channel_id:
@@ -267,6 +342,18 @@ class DriveHandler:
             return None
         return files[0] if files else None
 
+    def _find_channel_folder_anywhere(self, channel_id: str) -> dict | None:
+        if not channel_id:
+            return None
+        query = (
+            f"appProperties has {{ key='{CHANNEL_ID_PROPERTY}' and value='{channel_id}' }} "
+            f"and mimeType = '{FOLDER_MIME}' and trashed = false"
+        )
+        files = self.service.files().list(
+            q=query, fields="files(id, name)", pageSize=1
+        ).execute().get("files", [])
+        return files[0] if files else None
+
     def _stamp_channel_id(self, file_id: str, channel_id: str, name: str | None = None):
         body = {"appProperties": {CHANNEL_ID_PROPERTY: channel_id}}
         if name:
@@ -278,8 +365,7 @@ class DriveHandler:
 
     def rename_channel(self, channel_id: str, new_name: str) -> bool:
         """Follow a channel rename so uploads keep landing in the same folder."""
-        attachments_root = self._get_attachments_root()
-        found = self._find_by_channel_id(channel_id, attachments_root)
+        found = self._find_channel_folder_anywhere(channel_id)
         if not found:
             return False
         if found["name"] != f"#{new_name}":
@@ -289,7 +375,7 @@ class DriveHandler:
 
     def _get_or_create_channel_folder(
         self, channel_name: str, member_emails: list[str] | None = None,
-        channel_id: str = "",
+        channel_id: str = "", is_private: bool = False,
     ) -> str:
         """Get or create the channel's folder under the attachments folder.
 
@@ -299,7 +385,7 @@ class DriveHandler:
         if channel_name in self._channel_folders:
             return self._channel_folders[channel_name]
 
-        attachments_root = self._get_attachments_root()
+        attachments_root = self._get_private_root() if is_private else self._get_attachments_root()
         folder_name = f"#{channel_name}"
 
         stamped = self._find_by_channel_id(channel_id, attachments_root)
@@ -314,9 +400,8 @@ class DriveHandler:
             self._stamp_channel_id(folder_id, channel_id)
 
         if not folder_id:
-            # Channel folders used to sit directly under the root folder. Adopt
-            # one if it is still there, so uploads keep landing in the folder
-            # that already holds this channel's files.
+            # Adopt an old root-level channel folder so existing uploads remain
+            # in the same Drive folder after the layout change.
             legacy_id = self._find_folder(folder_name, self.root_folder_id)
             if legacy_id:
                 self.service.files().update(
@@ -326,7 +411,7 @@ class DriveHandler:
                     fields="id",
                 ).execute()
                 folder_id = legacy_id
-                logger.info(f"Moved {folder_name} under {ATTACHMENTS_FOLDER_NAME}")
+                logger.info(f"Moved {folder_name} into the channel folder area")
 
         if not folder_id:
             folder = self.service.files().create(
@@ -340,25 +425,33 @@ class DriveHandler:
             ).execute()
             folder_id = folder["id"]
 
+            if is_private and self.shared_drive_id:
+                if not restrict_folder_access(self.service, folder_id):
+                    raise RuntimeError(f"private フォルダ {folder_id} を限定アクセスにできません")
+
             # Access follows the channel, not whether Slack calls it private:
             # the spreadsheet linking to these files is members-only too.
-            shared = self._share_with_emails(folder_id, member_emails or [])
+            shared = self._share_with_emails(folder_id, member_emails or []) if is_private else 0
             logger.info(
                 f"Created Drive folder: {folder_name} (shared with {shared} members)"
             )
+
+        if is_private and self.shared_drive_id:
+            if not restrict_folder_access(self.service, folder_id):
+                raise RuntimeError(f"private フォルダ {folder_id} を限定アクセスにできません")
 
         self._channel_folders[channel_name] = folder_id
         return folder_id
 
     def sync_channel_access(
         self, channel_name: str, member_emails: list[str],
-        revoke: list[str] | None = None, channel_id: str = "",
+        revoke: list[str] | None = None, channel_id: str = "", is_private: bool = False,
     ) -> tuple[int, int]:
         """Match the channel folder's readers to the channel's membership."""
         folder_id = self._get_or_create_channel_folder(
-            channel_name, member_emails, channel_id
+            channel_name, member_emails, channel_id, is_private
         )
-        if self.shared_drive_id:
+        if self.shared_drive_id and not is_private:
             return (0, 0)
         return sync_permissions(self.service, folder_id, member_emails, revoke)
 
@@ -370,10 +463,11 @@ class DriveHandler:
         channel_name: str,
         member_emails: list[str] | None = None,
         channel_id: str = "",
+        is_private: bool = False,
     ) -> tuple[str, str]:
         """Upload a file to the channel's folder. Returns (file name, link)."""
         folder_id = self._get_or_create_channel_folder(
-            channel_name, member_emails, channel_id
+            channel_name, member_emails, channel_id, is_private
         )
 
         file_metadata = {
@@ -402,6 +496,7 @@ class DriveHandler:
         channel_name: str,
         member_emails: list[str] | None = None,
         channel_id: str = "",
+        is_private: bool = False,
     ) -> tuple[str, str] | None:
         """Download a file from Slack and upload it to Google Drive.
 
@@ -438,7 +533,7 @@ class DriveHandler:
         try:
             return self.upload_file(
                 file_name, resp.content, mime_type,
-                channel_name, member_emails, channel_id,
+                channel_name, member_emails, channel_id, is_private,
             )
         except Exception as e:
             logger.error(f"Failed to upload to Drive: {e}")
