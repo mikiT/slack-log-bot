@@ -274,10 +274,7 @@ App-Level Token だけはマニフェストで作れないため、手動で生�
 1. 左メニュー **「Install App」** → **「Install to Workspace」**
 2. 権限を確認して **「許可する」**
 3. 表示される **Bot User OAuth Token**（`xoxb-...`）を控えておく
-4. 記録したいチャンネルにbotを招待:
-   ```
-  /invite @slack-log-bot-private
-   ```
+4. 記録したいチャンネルにbotを招待: `/invite @slack-log-bot-private`
    > プライベートチャンネルにも忘れずに招待してください
 
 <details>
@@ -329,12 +326,41 @@ App-Level Token だけはマニフェストで作れないため、手動で生�
    - **Google Sheets API** — [有効化リンク](https://console.cloud.google.com/apis/library/sheets.googleapis.com)
    - **Google Drive API** — [有効化リンク](https://console.cloud.google.com/apis/library/drive.googleapis.com)
 3. **OAuth同意画面**（[Google Auth Platform](https://console.cloud.google.com/auth/overview)）を設定
-   - ユーザーの種類: **外部**
-   - アプリ名・ユーザーサポートメール・デベロッパー連絡先を入力
-4. **[対象](https://console.cloud.google.com/auth/audience) → 「アプリを公開」** を実行し、公開ステータスを **「本番環境」** にする
-5. **[認証情報](https://console.cloud.google.com/apis/credentials) → 「認証情報を作成」→「OAuth クライアント ID」**
+  - 左メニューの **「ブランディング」** を開く
+  - **アプリ名**に `Slackログ保存bot_privch対応版` を入力
+  - **ユーザーサポートメール**は自分の Google アカウントを選択
+  - 下部の **デベロッパーの連絡先情報**に自分のメールアドレスを入力
+  - ホームページとプライバシーポリシーは、後述の GitHub Pages URL を入力
+  - ロゴと利用規約 URL は個人利用なら空欄のままでよい
+  - 画面下部の **「保存」** を押す
+4. **[対象](https://console.cloud.google.com/auth/audience)** を開く
+  - **ユーザーの種類**は **外部** を選択
+  - **テストユーザー**に、Drive と Sheets を操作する自分の Google アカウントを追加
+5. 必要に応じて **[データアクセス](https://console.cloud.google.com/auth/scopes)** を開き、次のスコープを追加
+  - `https://www.googleapis.com/auth/spreadsheets`
+  - `https://www.googleapis.com/auth/drive`
+6. **[認証情報](https://console.cloud.google.com/apis/credentials) →「認証情報を作成」→「OAuth クライアント ID」**
    - アプリケーションの種類: **デスクトップアプリ**
    - 作成後、JSONをダウンロードして `client_secret.json` としてプロジェクトに配置
+
+> ブランディング画面のアプリ名が `temp-...` のままでも動作しますが、OAuth の確認画面に表示される名前なので、
+> この bot 用の名前に変更してください。**確認ステータス**の警告は、個人利用の初回設定では無視して構いません。
+>
+> Google Auth Platform の画面に **「外部」** が表示されない場合は、ブランディングを保存してから
+> 左メニューの **「対象」** を開いてください。そこで「内部」または「外部」を選択します。
+> 「内部」しか選べない場合は、Google Workspace 組織に属するプロジェクトで、管理者が外部アプリを
+> 禁止している可能性があります。その場合は管理者に外部アプリの許可を依頼するか、個人利用できる
+> Google Cloud プロジェクトを選択してください。
+
+GitHub Pages を使う場合の入力例:
+
+- 承認済みドメイン: `mikiT.github.io`
+- アプリケーションのホームページ: `https://mikiT.github.io/slack-log-bot/`
+- プライバシーポリシー: `https://mikiT.github.io/slack-log-bot/privacy-policy.html`
+
+GitHub Pages はリポジトリの **Settings → Pages** で Source を **GitHub Actions** に設定してください。
+`.github/workflows/pages.yml` が `privacy-policy/` ディレクトリだけを Pages として公開します。
+`main` ブランチへ push すると自動でデプロイされます。
 
 > [!IMPORTANT]
 > **手順4（本番環境への切り替え）を飛ばさないでください。**
