@@ -224,6 +224,18 @@ def check_slack(env: dict[str, str]) -> dict[str, str]:
         env["SLACK_APP_TOKEN"] = ask("SLACK_APP_TOKEN (xapp-...)", check_token_shape("xapp-"))
         warn_if_truncated(env["SLACK_APP_TOKEN"], 64)
 
+    try:
+        WebClient(token=env["SLACK_APP_TOKEN"]).apps_connections_open()
+        ok("Socket Mode 用 App-Level Token を確認")
+    except SlackApiError as e:
+        code = e.response.get("error", "unknown")
+        warn(f"App-Level Token が無効です: {code}")
+        print("    Basic Information → App-Level Tokens で、現在の Slack App 用に")
+        print("    connections:write を付けた xapp-... token を再発行してください。")
+        fail("Socket Mode 用 App-Level Token を確認できませんでした。")
+    except Exception as e:
+        fail(f"Socket Mode 用 App-Level Token の確認に失敗しました: {e}")
+
     # Re-prompt on failure rather than exiting: re-running the whole wizard
     # because one paste came up short is needless.
     attempts = 3
@@ -616,17 +628,6 @@ def check_drive(target: str) -> bool:
             )
 
         if folder:
-            if drive_id:
-                attempt(
-                    "privateフォルダの限定アクセス設定",
-                    lambda: drive.files().update(
-                        fileId=folder["id"],
-                        body={"inheritedPermissionsDisabled": True},
-                        fields="id",
-                    ).execute(),
-                    "限定アクセスを設定できません。共有ドライブの設定と bot の権限を確認してください。",
-                )
-
             found = attempt(
                 "作ったものを検索で見つけられるか",
                 lambda: drive.files().list(
@@ -718,7 +719,7 @@ def provision_google_resources(
     if in_shared_drive:
         ok("保存先は共有ドライブです")
         print("      ファイルの所有者は共有ドライブ（組織）になります。")
-        print("      private channel は限定アクセスフォルダで個別共有します。")
+        print("      private channel は限定公開済みの親フォルダの権限を継承します。")
 
     spreadsheet_id = env.get("GOOGLE_SPREADSHEET_ID") or find_file(
         drive, public_folder_id, "application/vnd.google-apps.spreadsheet"

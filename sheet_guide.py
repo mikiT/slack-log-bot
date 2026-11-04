@@ -163,9 +163,6 @@ def write_channel_index(spreadsheet, entries: dict[str, str]):
     With one spreadsheet per channel, nothing otherwise tells you which files
     exist or which channel each one covers.
     """
-    if not entries:
-        return
-
     rows = [INDEX_HEADER]
     rows += [[f"#{name}", url] for name, url in sorted(entries.items())]
 
@@ -269,6 +266,22 @@ def ensure_guide_sheet(spreadsheet, shared_drive: bool = False) -> bool:
             except Exception as e:
                 logger.warning(f"Could not remove empty sheet {ws.title}: {e}")
         return False
+
+    # Older public-channel runs renamed the default guide sheet to the first
+    # channel name instead of creating a new tab. Recover that guide by its
+    # title cell before creating another copy.
+    for worksheet in worksheets:
+        try:
+            first_row = worksheet.row_values(1)
+        except Exception:
+            continue
+        if first_row and first_row[0].strip() == "Slack ログ":
+            try:
+                worksheet.update_title(GUIDE_SHEET_TITLE)
+                logger.info(f"Restored guide sheet from renamed tab: {worksheet.title}")
+            except Exception as e:
+                logger.warning(f"Could not restore guide sheet: {e}")
+            return False
 
     rows = [list(row) for row in guide_rows(shared_drive)]
 

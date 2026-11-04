@@ -1,6 +1,5 @@
 import os
 import unittest
-from unittest.mock import Mock
 
 
 os.environ.setdefault("SLACK_BOT_TOKEN", "xoxb-test")
@@ -10,7 +9,6 @@ from google_drive import (  # noqa: E402
     FOLDER_MIME,
     ensure_folder,
     move_into_folder,
-    restrict_folder_access,
 )
 
 
@@ -86,26 +84,6 @@ class GoogleDriveLayoutTests(unittest.TestCase):
         self.assertTrue(moved)
         self.assertEqual(files.updated[0]["addParents"], "public-id")
         self.assertEqual(files.updated[0]["removeParents"], "old-parent")
-
-    def test_restrict_folder_access_sets_limited_access(self):
-        files = FakeFiles()
-
-        restricted = restrict_folder_access(FakeDrive(files), "private-folder")
-
-        self.assertTrue(restricted)
-        self.assertEqual(
-            files.updated[0]["body"],
-            {"inheritedPermissionsDisabled": True},
-        )
-
-    def test_restrict_folder_access_returns_false_on_api_error(self):
-        files = Mock()
-        files.update.side_effect = RuntimeError("permission denied")
-
-        restricted = restrict_folder_access(FakeDrive(files), "private-folder")
-
-        self.assertFalse(restricted)
-
 
 if __name__ == "__main__":
     unittest.main()

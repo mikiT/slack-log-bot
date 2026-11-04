@@ -5,6 +5,7 @@ Public channels → shared spreadsheet, Private channels → separate spreadshee
 
 Usage:
     python backfill.py                      # All channels the bot is in
+    python backfill.py --public              # All public channels the bot is in
     python backfill.py --channel general     # Specific channel by name
     python backfill.py --days 30            # Last 30 days (default: 90)
 """
@@ -33,7 +34,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def backfill(channel_filter: str | None = None, days: int = 90):
+def backfill(
+    channel_filter: str | None = None, days: int = 90, public_only: bool = False
+):
     client = WebClient(token=config.SLACK_BOT_TOKEN)
     install_retry_handlers(client)
     sheets = SheetsHandler()
@@ -57,12 +60,34 @@ def backfill(channel_filter: str | None = None, days: int = 90):
         if not cursor:
             break
 
-    channels = [ch for ch in channels if ch.get("is_member")]
+    listed_channels = channels
+    channels = [ch for ch in listed_channels if ch.get("is_member")]
+
+    if public_only:
+        channels = [
+            ch for ch in channels
+            if not (ch.get("is_private", False) or ch.get("is_group", False))
+        ]
 
     if channel_filter:
-        channels = [ch for ch in channels if ch["name"] == channel_filter]
+        requested_name = channel_filter.lstrip("#")
+        listed_match = next(
+            (ch for ch in listed_channels if ch["name"] == requested_name), None
+        )
+        channels = [ch for ch in channels if ch["name"] == requested_name]
         if not channels:
-            logger.error(f"Channel '{channel_filter}' not found or bot is not a member.")
+            if listed_match:
+                logger.error(
+                    f"Channel '#{requested_name}' はSlack APIでは見えていますが、"
+                    f"botが未参加です（channel_id={listed_match['id']}）。"
+                    "先に /invite @slack-log-bot-private を実行してください。"
+                )
+            else:
+                logger.error(
+                    f"Channel '#{requested_name}' はSlack APIの一覧にありません。"
+                    "チャンネル名、Slack App、SLACK_BOT_TOKENのworkspaceを確認してください。"
+                    f"（API取得件数: {len(listed_channels)}）"
+                )
             return
 
     oldest = datetime.now(timezone.utc) - timedelta(days=days)
@@ -109,7 +134,14 @@ def backfill(channel_filter: str | None = None, days: int = 90):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Backfill Slack messages to Google Sheets")
     parser.add_argument("--channel", type=str, help="Channel name to backfill (default: all)")
+    parser.add_argument(
+        "--public", action="store_true",
+        help="Backfill all public channels the bot is in",
+    )
     parser.add_argument("--days", type=int, default=90, help="Number of days to look back (default: 90)")
     args = parser.parse_args()
 
-    backfill(channel_filter=args.channel, days=args.days)
+    if args.channel and args.public:
+        parser.error("--channel and --public cannot be used together")
+
+    backfill(channel_filter=args.channel, days=args.days, public_only=args.public)

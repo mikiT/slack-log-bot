@@ -110,25 +110,6 @@ def shared_drive_id(service, file_id: str) -> str | None:
         return None
 
 
-def restrict_folder_access(service, folder_id: str) -> bool:
-    """Stop a shared-drive folder inheriting the parent's access.
-
-    This is the Drive API equivalent of a folder's "limited access" setting.
-    It is harmless for My Drive folders and lets private channel folders be
-    shared independently inside a shared drive.
-    """
-    try:
-        service.files().update(
-            fileId=folder_id,
-            body={"inheritedPermissionsDisabled": True},
-            fields="id",
-        ).execute()
-        return True
-    except Exception as e:
-        logger.warning(f"Could not restrict access to folder {folder_id}: {e}")
-        return False
-
-
 def ensure_folder(service, name: str, parent_id: str) -> str:
     """Return a named child folder, creating it when necessary."""
     try:
@@ -425,20 +406,12 @@ class DriveHandler:
             ).execute()
             folder_id = folder["id"]
 
-            if is_private and self.shared_drive_id:
-                if not restrict_folder_access(self.service, folder_id):
-                    raise RuntimeError(f"private フォルダ {folder_id} を限定アクセスにできません")
-
             # Access follows the channel, not whether Slack calls it private:
             # the spreadsheet linking to these files is members-only too.
             shared = self._share_with_emails(folder_id, member_emails or []) if is_private else 0
             logger.info(
                 f"Created Drive folder: {folder_name} (shared with {shared} members)"
             )
-
-        if is_private and self.shared_drive_id:
-            if not restrict_folder_access(self.service, folder_id):
-                raise RuntimeError(f"private フォルダ {folder_id} を限定アクセスにできません")
 
         self._channel_folders[channel_name] = folder_id
         return folder_id
@@ -511,9 +484,14 @@ class DriveHandler:
             )
             return None
 
-        url = file_info.get("url_private_download") or file_info.get("url_private")
+        # External links (for example a Google Sheets URL pasted into Slack)
+        # can appear in the file payload, but they are not downloadable with
+        # the Slack token. Only Slack's private download URL is an attachment.
+        url = file_info.get("url_private_download")
         if not url:
-            logger.warning(f"No download URL for file: {file_info.get('name')}")
+            logger.info(
+                f"Skipping external Slack file: {file_info.get('name')}"
+            )
             return None
 
         try:

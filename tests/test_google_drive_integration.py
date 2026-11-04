@@ -47,8 +47,6 @@ class GoogleDriveIntegrationTests(unittest.TestCase):
         import gspread
         from googleapiclient.http import MediaIoBaseUpload
 
-        from google_drive import restrict_folder_access
-
         folder = self.drive.files().create(
             body={
                 "name": f"__slack-log-bot-integration-{uuid.uuid4().hex}__",
@@ -59,12 +57,6 @@ class GoogleDriveIntegrationTests(unittest.TestCase):
         ).execute()
         folder_id = folder["id"]
         self.created_ids.append(folder_id)
-
-        self.assertTrue(restrict_folder_access(self.drive, folder_id))
-        restricted = self.drive.files().get(
-            fileId=folder_id, fields="inheritedPermissionsDisabled"
-        ).execute()
-        self.assertTrue(restricted.get("inheritedPermissionsDisabled"))
 
         # The real Sheets client uses the same OAuth credential as Drive.
         spreadsheet = gspread.authorize(self.credentials).create(

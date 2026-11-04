@@ -9,6 +9,7 @@ Private channels → separate spreadsheet per channel (members only)
 
 Usage:
     python collect_weekly.py                    # Past 7 days, all channels
+    python collect_weekly.py --public            # Past 7 days, all public channels
     python collect_weekly.py --channel general  # Specific channel
     python collect_weekly.py --days 14          # Custom range (default: 8 for overlap margin)
 """
@@ -40,7 +41,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def collect(channel_filter: str | None = None, days: int = 8):
+def collect(
+    channel_filter: str | None = None, days: int = 8, public_only: bool = False
+):
     client = WebClient(token=config.SLACK_BOT_TOKEN)
     install_retry_handlers(client)
     sheets = SheetsHandler()
@@ -65,6 +68,12 @@ def collect(channel_filter: str | None = None, days: int = 8):
             break
 
     channels = [ch for ch in channels if ch.get("is_member")]
+
+    if public_only:
+        channels = [
+            ch for ch in channels
+            if not (ch.get("is_private", False) or ch.get("is_group", False))
+        ]
 
     if channel_filter:
         channels = [ch for ch in channels if ch["name"] == channel_filter]
@@ -130,9 +139,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Weekly Slack message collection")
     parser.add_argument("--channel", type=str, help="Channel name (default: all)")
     parser.add_argument(
+        "--public", action="store_true",
+        help="Collect all public channels the bot is in",
+    )
+    parser.add_argument(
         "--days", type=int, default=8,
         help="Days to look back (default: 8 = 7 days + 1 day overlap margin)"
     )
     args = parser.parse_args()
 
-    collect(channel_filter=args.channel, days=args.days)
+    if args.channel and args.public:
+        parser.error("--channel and --public cannot be used together")
+
+    collect(channel_filter=args.channel, days=args.days, public_only=args.public)

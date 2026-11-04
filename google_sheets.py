@@ -19,7 +19,7 @@ import config
 from google_auth import load_credentials
 from google_drive import (
     PRIVATE_FOLDER_NAME, PUBLIC_FOLDER_NAME, drive_service, ensure_folder,
-    find_file, move_into_folder, restrict_folder_access, shared_drive_id,
+    find_file, move_into_folder, shared_drive_id,
     sync_permissions,
 )
 from sheet_guide import ensure_guide_sheet, write_channel_index
@@ -290,6 +290,9 @@ class SheetsHandler:
         try:
             if ensure_guide_sheet(self.index_spreadsheet, bool(self.shared_drive_id)):
                 logger.info("Created guide sheet in the shared spreadsheet")
+            # The index is intentionally public-channel-only. Refreshing it at
+            # startup removes private-channel entries left by older versions.
+            write_channel_index(self.index_spreadsheet, {})
         except Exception as e:
             logger.warning(f"Could not create guide sheet: {e}")
 
@@ -1366,8 +1369,6 @@ class SheetsHandler:
                     f"{ss_name} is not shared with anyone: no member email was "
                     f"resolvable. Check the users:read.email scope."
                 )
-            self._register_in_index(channel_name, ss)
-
         self._channel_spreadsheets[channel_name] = ss
         return ss
 
@@ -1398,51 +1399,23 @@ class SheetsHandler:
             folder_id = folder["id"]
             logger.info(f"Created private channel folder: #{channel_name}")
 
-        if self.shared_drive_id:
-            if not restrict_folder_access(self._drive, folder_id):
-                raise RuntimeError(f"private フォルダ {folder_id} を限定アクセスにできません")
         sync_permissions(self._drive, folder_id, member_emails, role="reader")
 
         return folder_id
 
-    def _register_in_index(self, channel_name: str, spreadsheet: gspread.Spreadsheet):
-        """Record the channel's spreadsheet URL in the index."""
+    def _register_in_index(
+        self, channel_name: str, spreadsheet: gspread.Spreadsheet, worksheet_id: int
+    ):
+        """Record a public channel's tab URL in the index."""
         try:
-            self._index_entries[channel_name] = spreadsheet.url
+            self._index_entries[channel_name] = f"{spreadsheet.url}#gid={worksheet_id}"
             write_channel_index(self.index_spreadsheet, self._collect_index_entries())
         except Exception as e:
             logger.warning(f"Could not update the channel index: {e}")
 
     def _collect_index_entries(self) -> dict[str, str]:
-        """Every private channel spreadsheet in the private folder, by name."""
-        entries = dict(self._index_entries)
-        try:
-            found = []
-            folders = self._drive.files().list(
-                q=(
-                    f"'{self.private_root_id}' in parents and "
-                    "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-                ),
-                fields="files(id)", pageSize=1000,
-            ).execute().get("files", [])
-            for folder in folders:
-                found.extend(self._drive.files().list(
-                    q=(
-                        f"'{folder['id']}' in parents and "
-                        "mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false"
-                    ),
-                    fields="files(id, name)", pageSize=1000,
-                ).execute().get("files", []))
-            for meta in found:
-                if not meta["name"].startswith("Slack Log - #"):
-                    continue
-                name = meta["name"][len("Slack Log - #"):]
-                entries.setdefault(
-                    name, f"https://docs.google.com/spreadsheets/d/{meta['id']}/edit"
-                )
-        except Exception as e:
-            logger.warning(f"Could not list channel spreadsheets: {e}")
-        return entries
+        """Public-channel entries currently discovered in this process."""
+        return dict(self._index_entries)
 
     def _get_or_create_channel_sheet(
         self, channel_name: str, member_emails: list[str] | None = None,
@@ -1458,8 +1431,13 @@ class SheetsHandler:
         try:
             worksheet = ss.worksheet(channel_name)
         except gspread.exceptions.WorksheetNotFound:
-            worksheet = ss.sheet1
-            _retry(worksheet.update_title, channel_name, idempotent=False)
+            if ss is self.index_spreadsheet:
+                worksheet = ss.add_worksheet(
+                    title=channel_name, rows=1000, cols=len(HEADER_ROW)
+                )
+            else:
+                worksheet = ss.sheet1
+                _retry(worksheet.update_title, channel_name, idempotent=False)
 
         is_new = False
         if worksheet.row_count == 0 or not _retry(worksheet.row_values, 1):
@@ -1469,6 +1447,9 @@ class SheetsHandler:
         if is_new or channel_name not in self._formatted_sheets:
             self._format_sheet(worksheet, ss)
             self._formatted_sheets.add(channel_name)
+
+        if channel_name not in self._private_channel_ids:
+            self._register_in_index(channel_name, ss, worksheet.id)
 
         self._sheet_cache[channel_name] = worksheet
         return worksheet
@@ -1626,6 +1607,13 @@ class SheetsHandler:
 
     def get_spreadsheet_url(self, channel_name: str) -> str | None:
         """Return the spreadsheet URL for a channel, or None if it has none yet."""
+        if channel_name not in self._private_channel_ids:
+            try:
+                worksheet = self.index_spreadsheet.worksheet(channel_name)
+                return f"{self.index_spreadsheet.url}#gid={worksheet.id}"
+            except gspread.exceptions.WorksheetNotFound:
+                return None
+
         if channel_name in self._channel_spreadsheets:
             return self._channel_spreadsheets[channel_name].url
         try:

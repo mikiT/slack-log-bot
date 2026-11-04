@@ -112,8 +112,8 @@ Slack チャンネルのメンバーの Google アカウントにのみ共有さ
 
 索引スプレッドシートにはログ本体は入っておらず、
 `📖 このシートについて` と `📇 チャンネル一覧` に加えて、public channel のログタブを持ちます。
-チャンネル一覧には各チャンネルとそのログのURLが並び、新しいチャンネルが
-記録されるたびに自動で更新されます。
+チャンネル一覧には public channel とそのログタブへの URL が並びます。private channel は
+アクセス制御のため一覧には表示されず、専用フォルダ内のスプレッドシートを使用します。
 
 > **メンバーのメールアドレスが必要です。** Slack プロフィールのメールアドレスを
 > Google アカウントとして共有先に指定するため、`users:read.email` スコープが要ります。
@@ -145,20 +145,20 @@ private channel に共有する権限は**編集者**です。Google スプレ�
 #### 共有ドライブに保存する場合
 
 保存先フォルダが**共有ドライブ**の中にある場合も、private channel ごとのフォルダを
-限定アクセスにして、Slack メンバーだけをそのフォルダへ共有します。public channel は
+限定公開にした `private` 親フォルダの下に作成し、Slack メンバーだけをそのフォルダへ共有します。public channel は
 共有ドライブの通常のメンバー権限に従います。
 
 | | マイドライブ | 共有ドライブ |
 |---|---|---|
 | ファイルの所有者 | bot の Google アカウント | **共有ドライブ（組織）** |
 | bot のアカウントを失ったら | ログも失う | ログは残る |
-| チャンネルごとのアクセス制御 | 効く | private の限定アクセスフォルダで効く |
+| チャンネルごとのアクセス制御 | 効く | `private` 親フォルダの限定公開で効く |
 | 退出時の権限剥奪 | 効く | private フォルダで効く |
 
-private channel のフォルダは Google Drive API の限定アクセス設定を使います。
-フォルダ内の専用スプレッドシートと添付ファイルはフォルダの権限を継承するため、
-チャンネルごとのメンバーだけが閲覧できます。Google Workspace 管理者の設定や
-共有ドライブの権限によって限定アクセスを使えない場合は、Drive 側でエラーになります。
+共有ドライブを使う場合は、bot の起動前に `private` 親フォルダを Google Drive の
+「限定公開」に設定してください。channel ごとのフォルダ、専用スプレッドシート、
+添付ファイルはその権限を継承します。Google Workspace 管理者の設定で限定公開を
+使えない場合は、共有ドライブの管理者に設定を依頼してください。
 
 共有ドライブのメンバーは、限定アクセスを設定していない public channel のログを閲覧できます。
 private channel のログを見せる相手は Slack channel のメンバーとして管理してください。
@@ -216,7 +216,6 @@ botが作るものは、すべて1つのフォルダにまとまります。
  │
  ├── 📁 public
  │    ├── 📊 Slack ログ                    ← public channel のログタブ
- │    └── 📁 添付ファイル
  │         ├── 📁 #general
  │         └── 📁 #random
  │
@@ -353,18 +352,17 @@ App-Level Token だけはマニフェストで作れないため、手動で生�
 > Google Cloud プロジェクトを選択してください。
 
 GitHub Pages の設定、公開 URL、Google OAuth への入力値は
-[`docs/github-pages.md`](docs/github-pages.md) を参照してください。
+[`docs/github-pages.md`](docs/github-pages.md) を参照してください。t
 
 > [!IMPORTANT]
-> **手順4（本番環境への切り替え）を飛ばさないでください。**
+> 個人利用や動作確認だけなら、アプリを審査へ送信する必要はありません。
+> **対象**の画面で自分の Google アカウントをテストユーザーに追加してください。
+> 認証時に「このアプリは Google で確認されていません」と警告が出た場合は、
+> **「詳細」→「（アプリ名）に移動」** で進めます。
 >
-> 「テスト中」のままだと、次の2つが起きます:
-> - テストユーザーに自分を追加していないと、認証時に **`エラー 403: access_denied`** で弾かれる
-> - 追加して通した場合も、Googleの仕様で **リフレッシュトークンが7日で失効**し、1週間後に突然動かなくなる
->
-> 未審査のまま公開しても問題なく動作します（100ユーザーまでの制限付き）。
-> 認証時に「このアプリは Google で確認されていません」と警告が出ますが、
-> **「詳細」→「（アプリ名）に移動」** で進めてください。
+> テスト中の OAuth トークンは、Google の仕様でリフレッシュトークンが7日で失効する場合があります。
+> 長期間、複数ユーザーで運用する場合だけ、必要な情報を揃えて **アプリの検証**へ送信し、
+> 本番環境へ切り替えてください。
 
 ---
 
@@ -724,6 +722,9 @@ sudo systemctl enable --now slack-log-bot.service
 # 過去8日分を収集（7日 + 1日の重複マージン）
 python collect_weekly.py
 
+# botが参加しているpublic channel全件
+python collect_weekly.py --public
+
 # 特定チャンネルのみ
 python collect_weekly.py --channel general
 
@@ -774,6 +775,9 @@ Slackからコマンドでも実行できます: `@slack-log-bot-private backfil
 ```bash
 # 全チャンネル・過去90日分（デフォルト）
 python backfill.py
+
+# botが参加しているpublic channel全件・過去90日分
+python backfill.py --public
 
 # 特定チャンネルのみ
 python backfill.py --channel general
@@ -845,12 +849,12 @@ uv sync
 uv run python -m unittest discover -s tests -v
 ```
 
-Google API へ接続せず、Drive のフォルダ作成・移動・限定アクセス設定をモックで検証します。
+Google API へ接続せず、Drive のフォルダ作成・移動をモックで検証します。
 
 実際の Slack／Google Drive／Google Sheets との接続確認やバックフィルは、先に
 `uv run setup.py` を完了させ、`.env` と `drive_token.json` を用意してから実行してください。
 
-共有ドライブの限定アクセスを実 API で確認する場合は、保存先の設定と Google 認証を済ませたうえで、
+共有ドライブ配下への実 API 保存を確認する場合は、保存先の設定と Google 認証を済ませたうえで、
 次を実行します。テスト用のフォルダ、スプレッドシート、添付ファイルを作成し、終了時に削除します。
 
 ```bash
